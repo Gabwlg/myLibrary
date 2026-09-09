@@ -85,11 +85,11 @@ export function LibraryDashboard() {
   };
 
   const saveItem = async (item: LibraryItem) => {
-    const isExisting = items.some((existing) => existing.id === item.id);
+    const existingItem = items.find((existing) => existing.id === item.id);
 
     if (demoMode || !supabase || !userId) {
       setItems((prev) => {
-        if (isExisting) {
+        if (existingItem) {
           return prev.map((existing) => (existing.id === item.id ? item : existing));
         }
         return [item, ...prev];
@@ -99,8 +99,11 @@ export function LibraryDashboard() {
       return;
     }
 
-    if (isExisting) {
-      const updated = await updateLibraryItem(supabase, item);
+    if (existingItem) {
+      // The dashboard already holds the pre-edit Item, so its status can be
+      // threaded straight through — updateLibraryItem needs it to decide whether
+      // to append a progress event, and this avoids a round-trip to re-fetch it.
+      const updated = await updateLibraryItem(supabase, item, existingItem.status);
       setItems((prev) => prev.map((existing) => (existing.id === updated.id ? updated : existing)));
     } else {
       const created = await createLibraryItem(supabase, item, userId);

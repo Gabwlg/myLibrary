@@ -70,6 +70,52 @@ create policy "Users read own book details"
     )
   );
 
+-- progress_events: append-only log of Item status transitions. items.status is a
+-- read-only cache derived from this log by trg_set_item_status below.
+-- See docs/adr/0001-status-derived-from-progress-events.md.
+create table if not exists public.progress_events (
+  id uuid primary key default gen_random_uuid(),
+  item_id uuid not null references public.items(id) on delete cascade,
+  from_status text,
+  to_status text not null,
+  occurred_at timestamptz not null default now(),
+  created_at timestamptz not null default now()
+);
+
+alter table public.progress_events enable row level security;
+
+drop policy if exists "Users manage own progress events" on public.progress_events;
+create policy "Users manage own progress events"
+  on public.progress_events
+  for all
+  using (
+    exists (
+      select 1 from public.items
+      where items.id = progress_events.item_id and items.user_id = auth.uid()
+    )
+  )
+  with check (
+    exists (
+      select 1 from public.items
+      where items.id = progress_events.item_id and items.user_id = auth.uid()
+    )
+  );
+
+-- The trigger uses the just-inserted event, never occurred_at: correct only
+-- while events are never backdated out of order (see the ADR's Consequences).
+create or replace function public.set_item_status_from_progress_event()
+returns trigger as $$
+begin
+  update public.items set status = new.to_status where id = new.item_id;
+  return new;
+end;
+$$ language plpgsql security definer;
+
+drop trigger if exists trg_set_item_status on public.progress_events;
+create trigger trg_set_item_status
+  after insert on public.progress_events
+  for each row execute function public.set_item_status_from_progress_event();
+
 -- Seed examples (replace user UUID with a real auth user id)
 -- insert into public.items (id, user_id, type, title, creator, year, image_url, status, tags)
 -- values

@@ -1,8 +1,35 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import type { LibraryItem } from "@/types/library";
+import type { LibraryItem, LibraryStatus } from "@/types/library";
 
 type SupabaseRow = Record<string, unknown>;
+
+/** The columns written when appending a status transition to `progress_events`. */
+type ProgressEventInsert = {
+  item_id: string;
+  from_status: LibraryStatus | null;
+  to_status: LibraryStatus;
+};
+
+/**
+ * Decide the `progress_events` row an Item edit implies. `items.status` is a
+ * trigger-maintained cache of this log (docs/adr/0001), so an edit records an
+ * event only when the status actually moved; an unchanged status writes nothing.
+ */
+export function progressEventForStatusChange(
+  itemId: string,
+  previousStatus: LibraryStatus,
+  nextStatus: LibraryStatus,
+): ProgressEventInsert | null {
+  if (previousStatus === nextStatus) return null;
+  return { item_id: itemId, from_status: previousStatus, to_status: nextStatus };
+}
+
+/** Append one row to an Item's progress log, surfacing any write error. */
+async function appendProgressEvent(supabase: SupabaseClient, row: ProgressEventInsert): Promise<void> {
+  const { error } = await supabase.from("progress_events").insert(row);
+  if (error) throw error;
+}
 
 function asNumber(value: unknown): number | undefined {
   if (typeof value === "number") return value;
@@ -85,6 +112,17 @@ export async function createLibraryItem(supabase: SupabaseClient, payload: Libra
 
   if (error) throw error;
 
+  const newItem = data as SupabaseRow;
+
+  // Seed the Item's progress log with its first event. `from_status` is null
+  // because a brand-new Item has no prior status. The trigger on this insert
+  // sets `items.status`, which the seed value above already matches.
+  await appendProgressEvent(supabase, {
+    item_id: String(newItem.id),
+    from_status: null,
+    to_status: payload.status,
+  });
+
   if (payload.type === "movie" && payload.movieInfo) {
     await supabase.from("movie_info").upsert({
       id_item: payload.id,
@@ -101,10 +139,17 @@ export async function createLibraryItem(supabase: SupabaseClient, payload: Libra
     });
   }
 
-  return mapItem(data as SupabaseRow, payload.movieInfo as SupabaseRow | undefined, payload.bookInfo as SupabaseRow | undefined);
+  return mapItem(newItem, payload.movieInfo as SupabaseRow | undefined, payload.bookInfo as SupabaseRow | undefined);
 }
 
-export async function updateLibraryItem(supabase: SupabaseClient, payload: LibraryItem): Promise<LibraryItem> {
+export async function updateLibraryItem(
+  supabase: SupabaseClient,
+  payload: LibraryItem,
+  previousStatus: LibraryStatus,
+): Promise<LibraryItem> {
+  // `status` is intentionally absent here: it is a cache derived from
+  // `progress_events` (docs/adr/0001) and must never be written directly on an
+  // update. A status change is recorded by appending an event below instead.
   const { data, error } = await supabase
     .from("items")
     .update({
@@ -113,7 +158,6 @@ export async function updateLibraryItem(supabase: SupabaseClient, payload: Libra
       creator: payload.creator ?? null,
       year: payload.year ?? null,
       image_url: payload.imageUrl ?? null,
-      status: payload.status,
       notes: payload.notes ?? null,
       rating: payload.rating ?? null,
       tags: payload.tags,
@@ -123,6 +167,9 @@ export async function updateLibraryItem(supabase: SupabaseClient, payload: Libra
     .single();
 
   if (error) throw error;
+
+  const statusEvent = progressEventForStatusChange(payload.id, previousStatus, payload.status);
+  if (statusEvent) await appendProgressEvent(supabase, statusEvent);
 
   if (payload.type === "movie") {
     await supabase.from("movie_info").upsert({
@@ -149,7 +196,14 @@ export async function updateLibraryItem(supabase: SupabaseClient, payload: Libra
     ]);
   }
 
-  return mapItem(data as SupabaseRow, payload.movieInfo as SupabaseRow | undefined, payload.bookInfo as SupabaseRow | undefined);
+  // The `items` row was selected before the event above fired its trigger, so
+  // its `status` column is stale. The trigger sets it to exactly the event's
+  // `to_status`, i.e. `payload.status`, so reflect that in the returned Item.
+  return mapItem(
+    { ...(data as SupabaseRow), status: payload.status },
+    payload.movieInfo as SupabaseRow | undefined,
+    payload.bookInfo as SupabaseRow | undefined,
+  );
 }
 
 export async function deleteLibraryItem(supabase: SupabaseClient, id: string): Promise<void> {

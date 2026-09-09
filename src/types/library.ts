@@ -37,6 +37,21 @@ export interface LibraryItem {
   };
 }
 
+/**
+ * One recorded status transition in an Item's progress log. The log is the
+ * source of truth for `LibraryItem.status`; see
+ * docs/adr/0001-status-derived-from-progress-events.md. `fromStatus` is null for
+ * the first event of a newly added Item, which has no prior status.
+ */
+export interface ProgressEvent {
+  id: string;
+  itemId: string;
+  fromStatus: LibraryStatus | null;
+  toStatus: LibraryStatus;
+  occurredAt: string;
+  createdAt: string;
+}
+
 export interface ItemSuggestion {
   id: string;
   title: string;
