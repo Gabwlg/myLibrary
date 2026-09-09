@@ -1,0 +1,1 @@
+{"model":"claude-sonnet-5","max_tokens":1,"messages":[{"role":"user","content":"quota"}],"metadata":{"user_id":"{\"device_id\":\"f92ca0e9eae5486c5a5d1552a75783df8a757dbb9d312d2aa6842b9ba506ae91\",\"account_uuid\":\"9df64ede-dea7-46ab-af6b-f8d69f4a8469\",\"session_id\":\"98b8ead7-b01e-47ba-bcda-53d6238b932d\"}"}}
