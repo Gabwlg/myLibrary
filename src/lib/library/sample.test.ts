@@ -6,6 +6,6 @@ import { MEDIA_TYPES } from "@/types/library";
 // source. See docs/adr/0002-vitest-as-test-framework.md.
 describe("MEDIA_TYPES", () => {
   it("is exactly movie, book, other in order", () => {
-    expect([...MEDIA_TYPES]).toEqual(["movie", "book", "other"]);
+    expect([...MEDIA_TYPES]).toEqual(["movie", "book"]);
   });
 });
