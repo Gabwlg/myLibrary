@@ -32,12 +32,14 @@ alter table public.items enable row level security;
 alter table public.movie_info enable row level security;
 alter table public.book_info enable row level security;
 
+drop policy if exists "Users manage own items" on public.items;
 create policy "Users manage own items"
   on public.items
   for all
   using (auth.uid() = user_id)
   with check (auth.uid() = user_id);
 
+drop policy if exists "Users read own movie details" on public.movie_info;
 create policy "Users read own movie details"
   on public.movie_info
   for all
@@ -54,6 +56,7 @@ create policy "Users read own movie details"
     )
   );
 
+drop policy if exists "Users read own book details" on public.book_info;
 create policy "Users read own book details"
   on public.book_info
   for all
