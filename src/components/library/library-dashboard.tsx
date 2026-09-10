@@ -4,6 +4,10 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
 import { MEDIA_TYPE_LABELS, STATUS_OPTIONS } from "@/lib/library/constants";
+import {
+  appendDemoProgressEvent,
+  deriveInitialProgressEvents,
+} from "@/lib/library/demo-progress-log";
 import { applyFilters, DEFAULT_FILTERS } from "@/lib/library/filter-sort";
 import { SAMPLE_ITEMS } from "@/lib/library/sample-items";
 import { createSupabaseBrowserClient, hasSupabaseConfig } from "@/lib/supabase/client";
@@ -13,7 +17,7 @@ import {
   fetchLibraryItems,
   updateLibraryItem,
 } from "@/lib/supabase/library-repository";
-import type { LibraryItem, SortOption } from "@/types/library";
+import type { LibraryItem, ProgressEvent, SortOption } from "@/types/library";
 
 import { ItemCard } from "./item-card";
 import { ItemDetailModal } from "./item-detail-modal";
@@ -28,6 +32,15 @@ const sortOptions: { value: SortOption; label: string }[] = [
 
 export function LibraryDashboard() {
   const [items, setItems] = useState<LibraryItem[]>(() => (hasSupabaseConfig() ? [] : SAMPLE_ITEMS));
+  // Demo mode has no `progress_events` table to read, so the progress log is
+  // derived fresh in memory: a baseline event per sample Item on load, then one
+  // more appended on every status change (see saveItem). Nothing is persisted —
+  // a reload rebuilds this from SAMPLE_ITEMS. Only the setter is bound for now;
+  // the upcoming history view and stats chart will read this state so they need
+  // no Demo-mode special-casing (until then it is inspectable via React DevTools).
+  const [, setDemoProgressEvents] = useState<ProgressEvent[]>(() =>
+    hasSupabaseConfig() ? [] : deriveInitialProgressEvents(SAMPLE_ITEMS),
+  );
   const [selectedItem, setSelectedItem] = useState<LibraryItem | null>(null);
   const [editingItem, setEditingItem] = useState<LibraryItem | null>(null);
   const [isFormOpen, setIsFormOpen] = useState(false);
@@ -94,6 +107,11 @@ export function LibraryDashboard() {
         }
         return [item, ...prev];
       });
+      // Mirror the change into the in-memory progress log: a new Item gets an
+      // initial event, an edited one gets a transition only if its status moved.
+      setDemoProgressEvents((prev) =>
+        appendDemoProgressEvent(prev, item, existingItem ? existingItem.status : null),
+      );
       setIsFormOpen(false);
       setEditingItem(null);
       return;
