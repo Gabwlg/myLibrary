@@ -4,12 +4,8 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
 import { MEDIA_TYPE_LABELS, STATUS_OPTIONS } from "@/lib/library/constants";
-import {
-  appendDemoProgressEvent,
-  deriveInitialProgressEvents,
-} from "@/lib/library/demo-progress-log";
+import { removeDemoItem, saveDemoItem, useDemoLibrary } from "@/lib/library/demo-store";
 import { applyFilters, DEFAULT_FILTERS } from "@/lib/library/filter-sort";
-import { SAMPLE_ITEMS } from "@/lib/library/sample-items";
 import { createSupabaseBrowserClient, hasSupabaseConfig } from "@/lib/supabase/client";
 import {
   createLibraryItem,
@@ -17,7 +13,7 @@ import {
   fetchLibraryItems,
   updateLibraryItem,
 } from "@/lib/supabase/library-repository";
-import type { LibraryItem, ProgressEvent, SortOption } from "@/types/library";
+import type { LibraryItem, SortOption } from "@/types/library";
 
 import { ItemCard } from "./item-card";
 import { ItemDetailModal } from "./item-detail-modal";
@@ -31,16 +27,12 @@ const sortOptions: { value: SortOption; label: string }[] = [
 ];
 
 export function LibraryDashboard() {
-  const [items, setItems] = useState<LibraryItem[]>(() => (hasSupabaseConfig() ? [] : SAMPLE_ITEMS));
-  // Demo mode has no `progress_events` table to read, so the progress log is
-  // derived fresh in memory: a baseline event per sample Item on load, then one
-  // more appended on every status change (see saveItem). Nothing is persisted —
-  // a reload rebuilds this from SAMPLE_ITEMS. Only the setter is bound for now;
-  // the upcoming history view and stats chart will read this state so they need
-  // no Demo-mode special-casing (until then it is inspectable via React DevTools).
-  const [, setDemoProgressEvents] = useState<ProgressEvent[]>(() =>
-    hasSupabaseConfig() ? [] : deriveInitialProgressEvents(SAMPLE_ITEMS),
-  );
+  // Demo mode's collection and its derived progress log live in a shared
+  // module-level store (docs/adr/0003) so the per-Item history view at
+  // `/items/[id]` reads the same in-memory list. Real mode keeps its own state,
+  // loaded from Supabase in the effect below.
+  const demoLibrary = useDemoLibrary();
+  const [realItems, setRealItems] = useState<LibraryItem[]>([]);
   const [selectedItem, setSelectedItem] = useState<LibraryItem | null>(null);
   const [editingItem, setEditingItem] = useState<LibraryItem | null>(null);
   const [isFormOpen, setIsFormOpen] = useState(false);
@@ -53,6 +45,7 @@ export function LibraryDashboard() {
 
   const supabase = useMemo(() => createSupabaseBrowserClient(), []);
   const demoMode = !hasSupabaseConfig();
+  const items = demoMode ? demoLibrary.items : realItems;
 
   const filteredItems = useMemo(() => applyFilters(items, filters), [items, filters]);
 
@@ -71,7 +64,7 @@ export function LibraryDashboard() {
 
       if (id) {
         const loaded = await fetchLibraryItems(supabase, id);
-        setItems(loaded);
+        setRealItems(loaded);
       }
     };
 
@@ -81,10 +74,10 @@ export function LibraryDashboard() {
       const id = session?.user.id ?? null;
       setUserId(id);
       if (!id) {
-        setItems([]);
+        setRealItems([]);
         return;
       }
-      void fetchLibraryItems(supabase, id).then(setItems);
+      void fetchLibraryItems(supabase, id).then(setRealItems);
     });
 
     return () => {
@@ -97,46 +90,52 @@ export function LibraryDashboard() {
     setIsFormOpen(true);
   };
 
-  const saveItem = async (item: LibraryItem) => {
-    const existingItem = items.find((existing) => existing.id === item.id);
+  const closeForm = () => {
+    setIsFormOpen(false);
+    setEditingItem(null);
+  };
 
-    if (demoMode || !supabase || !userId) {
-      setItems((prev) => {
-        if (existingItem) {
-          return prev.map((existing) => (existing.id === item.id ? item : existing));
-        }
-        return [item, ...prev];
-      });
-      // Mirror the change into the in-memory progress log: a new Item gets an
-      // initial event, an edited one gets a transition only if its status moved.
-      setDemoProgressEvents((prev) =>
-        appendDemoProgressEvent(prev, item, existingItem ? existingItem.status : null),
-      );
-      setIsFormOpen(false);
-      setEditingItem(null);
+  const saveItem = async (item: LibraryItem) => {
+    if (demoMode) {
+      // The shared store mirrors this into the in-memory progress log: a new
+      // Item gets an initial event, an edited one a transition only if its
+      // status moved. Nothing else records status changes in Demo mode.
+      saveDemoItem(item);
+      closeForm();
       return;
     }
 
+    // Unreachable from the UI — the sign-in gate hides the form until userId is
+    // set — but guards the non-null assertions below and, crucially, keeps every
+    // real-mode status change going through the repository, which is the only
+    // path that appends a progress_events row (docs/adr/0001).
+    if (!supabase || !userId) return;
+
+    const existingItem = realItems.find((existing) => existing.id === item.id);
     if (existingItem) {
       // The dashboard already holds the pre-edit Item, so its status can be
       // threaded straight through — updateLibraryItem needs it to decide whether
       // to append a progress event, and this avoids a round-trip to re-fetch it.
       const updated = await updateLibraryItem(supabase, item, existingItem.status);
-      setItems((prev) => prev.map((existing) => (existing.id === updated.id ? updated : existing)));
+      setRealItems((prev) => prev.map((existing) => (existing.id === updated.id ? updated : existing)));
     } else {
       const created = await createLibraryItem(supabase, item, userId);
-      setItems((prev) => [created, ...prev]);
+      setRealItems((prev) => [created, ...prev]);
     }
 
-    setIsFormOpen(false);
-    setEditingItem(null);
+    closeForm();
   };
 
   const removeItem = async (id: string) => {
-    if (!demoMode && supabase && userId) {
+    if (demoMode) {
+      removeDemoItem(id);
+      setSelectedItem(null);
+      return;
+    }
+    if (supabase && userId) {
       await deleteLibraryItem(supabase, id);
     }
-    setItems((prev) => prev.filter((item) => item.id !== id));
+    setRealItems((prev) => prev.filter((item) => item.id !== id));
     setSelectedItem(null);
   };
 
