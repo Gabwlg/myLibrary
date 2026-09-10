@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import type { LibraryItem, LibraryStatus } from "@/types/library";
+import type { LibraryItem, LibraryStatus, ProgressEvent } from "@/types/library";
 
 type SupabaseRow = Record<string, unknown>;
 
@@ -69,6 +69,46 @@ function mapItem(row: SupabaseRow, movieInfo?: SupabaseRow, bookInfo?: SupabaseR
   };
 }
 
+/**
+ * Map one `progress_events` row to `ProgressEvent`, snake_case -> camelCase and
+ * with the same shape of fallbacks `mapItem` uses: `String(... ?? default)` for
+ * the required text/timestamp columns and a bare cast for the status enums (cf.
+ * `mapItem`'s `row.status as ...`). `from_status` is nullable — it is null only
+ * for an Item's first event.
+ */
+function mapProgressEvent(row: SupabaseRow): ProgressEvent {
+  return {
+    id: String(row.id),
+    itemId: String(row.item_id),
+    fromStatus: (row.from_status as LibraryStatus | null) ?? null,
+    toStatus: (row.to_status as LibraryStatus) ?? "planned",
+    occurredAt: String(row.occurred_at ?? new Date().toISOString()),
+    createdAt: String(row.created_at ?? new Date().toISOString()),
+  };
+}
+
+/**
+ * One Item's progress log — every recorded status transition — oldest event
+ * first, so callers can render it as a top-to-bottom timeline. `items.status` is
+ * a cache of this log's most recent event (docs/adr/0001).
+ */
+export async function fetchProgressEvents(
+  supabase: SupabaseClient,
+  itemId: string,
+): Promise<ProgressEvent[]> {
+  const { data, error } = await supabase
+    .from("progress_events")
+    .select("*")
+    .eq("item_id", itemId)
+    // `created_at` breaks ties so a backfilled creation event and a same-instant
+    // transition still order by insertion, not arbitrarily.
+    .order("occurred_at", { ascending: true })
+    .order("created_at", { ascending: true });
+
+  if (error) throw error;
+  return ((data ?? []) as SupabaseRow[]).map(mapProgressEvent);
+}
+
 export async function fetchLibraryItems(supabase: SupabaseClient, userId: string): Promise<LibraryItem[]> {
   const { data: rows, error } = await supabase
     .from("items")
@@ -89,6 +129,17 @@ export async function fetchLibraryItems(supabase: SupabaseClient, userId: string
   const bookMap = new Map((bookDetails.data ?? []).map((row) => [String((row as SupabaseRow).id_item), row as SupabaseRow]));
 
   return items.map((row) => mapItem(row, movieMap.get(String(row.id)), bookMap.get(String(row.id))));
+}
+
+/**
+ * One Item by id, or null when it does not exist or is hidden by RLS. The
+ * companion movie/book record is not joined — callers that only need the shared
+ * fields (e.g. the history view's title) can skip that round-trip.
+ */
+export async function fetchLibraryItem(supabase: SupabaseClient, id: string): Promise<LibraryItem | null> {
+  const { data, error } = await supabase.from("items").select("*").eq("id", id).maybeSingle();
+  if (error) throw error;
+  return data ? mapItem(data as SupabaseRow) : null;
 }
 
 export async function createLibraryItem(supabase: SupabaseClient, payload: LibraryItem, userId: string): Promise<LibraryItem> {
