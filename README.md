@@ -47,7 +47,11 @@ cp .env.example .env.local
 
 4. In Supabase SQL editor, run:
 
-- `/home/runner/work/myLibrary/myLibrary/supabase/schema.sql`
+- `supabase/schema.sql`
+- `supabase/backfill-progress-events.sql` — the one-time Backfill: run once
+  after `schema.sql` has been applied to an existing production database, to
+  synthesise the first Progress event for Items that predate the
+  `progress_events` log. Safe to re-run; a no-op on a fresh database.
 
 5. Start development server:
 
