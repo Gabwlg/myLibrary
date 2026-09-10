@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import type { LibraryItem, LibraryStatus, ProgressEvent } from "@/types/library";
+import type { LibraryItem, LibraryStatus, MediaType, ProgressEvent } from "@/types/library";
 
 type SupabaseRow = Record<string, unknown>;
 
@@ -107,6 +107,52 @@ export async function fetchProgressEvents(
 
   if (error) throw error;
   return ((data ?? []) as SupabaseRow[]).map(mapProgressEvent);
+}
+
+/** One `progress_events` row reduced to what the stats aggregation reads. */
+type FinishEventRow = {
+  itemId: string;
+  toStatus: LibraryStatus;
+  occurredAt: string;
+};
+
+/**
+ * Everything the "finished per month" aggregation needs for a user's whole
+ * collection, fetched in one round trip: each status transition paired with the
+ * `type` of the Item it belongs to. The join is `items!inner` (for `type`), the
+ * redundant `items.user_id` filter mirrors `fetchLibraryItems` (RLS already
+ * scopes the log), and `occurred_at` ordering matches `fetchProgressEvents`.
+ *
+ * `items` is deduplicated to one entry per Item. Deciding which of these events
+ * are *finishing* events is left to the `finishedPerMonth` aggregation.
+ */
+export async function fetchFinishedPerMonthSource(
+  supabase: SupabaseClient,
+  userId: string,
+): Promise<{ events: FinishEventRow[]; items: Pick<LibraryItem, "id" | "type">[] }> {
+  const { data, error } = await supabase
+    .from("progress_events")
+    .select("item_id, to_status, occurred_at, items!inner(type, user_id)")
+    .eq("items.user_id", userId)
+    .order("occurred_at", { ascending: true });
+
+  if (error) throw error;
+
+  const rows = (data ?? []) as SupabaseRow[];
+  const events = rows.map((row) => ({
+    itemId: String(row.item_id),
+    toStatus: (row.to_status as LibraryStatus) ?? "planned",
+    occurredAt: String(row.occurred_at ?? new Date().toISOString()),
+  }));
+
+  const typeByItemId = new Map<string, MediaType>();
+  for (const row of rows) {
+    const joined = (row.items ?? {}) as SupabaseRow;
+    typeByItemId.set(String(row.item_id), (joined.type as MediaType) ?? "other");
+  }
+  const items = [...typeByItemId].map(([id, type]) => ({ id, type }));
+
+  return { events, items };
 }
 
 export async function fetchLibraryItems(supabase: SupabaseClient, userId: string): Promise<LibraryItem[]> {

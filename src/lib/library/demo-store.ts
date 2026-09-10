@@ -3,6 +3,7 @@ import { useSyncExternalStore } from "react";
 import type { LibraryItem, ProgressEvent } from "@/types/library";
 
 import { appendDemoProgressEvent, deriveInitialProgressEvents } from "./demo-progress-log";
+import { finishedPerMonth, type MonthlyFinishCount } from "./finished-per-month";
 import { SAMPLE_ITEMS } from "./sample-items";
 
 /**
@@ -71,6 +72,16 @@ export function selectItemHistory(
     item: state.items.find((candidate) => candidate.id === itemId) ?? null,
     events: state.progressEvents.filter((event) => event.itemId === itemId),
   };
+}
+
+/**
+ * The "finished per month" chart data for a Demo-mode snapshot: the same
+ * aggregation real mode runs over its `progress_events` query, here over the
+ * derived in-memory log. Keeps the walk next to the state it reads, matching
+ * `selectItemHistory`.
+ */
+export function selectFinishedPerMonth(state: DemoLibraryState): MonthlyFinishCount[] {
+  return finishedPerMonth(state.progressEvents, state.items);
 }
 
 // A module-level store, not React state or `sessionStorage`: Demo mode must

@@ -1,8 +1,8 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
+import { LibraryPageFrame, LibraryPageNotice } from "@/components/library/library-page-frame";
 import { selectItemHistory, useDemoLibrary } from "@/lib/library/demo-store";
 import { formatEventTime, transitionLabel } from "@/lib/library/progress-format";
 import { createSupabaseBrowserClient, hasSupabaseConfig } from "@/lib/supabase/client";
@@ -59,18 +59,22 @@ export function ItemHistoryView({ itemId }: ItemHistoryViewProps) {
     return <HistoryShell item={item} events={events} />;
   }
 
-  if (real.phase === "loading") return <Notice>Loading history…</Notice>;
+  if (real.phase === "loading") return <LibraryPageNotice>Loading history…</LibraryPageNotice>;
   if (real.phase === "signed-out") {
-    return <Notice>Sign in on the dashboard to view this item&rsquo;s history.</Notice>;
+    return (
+      <LibraryPageNotice>
+        Sign in on the dashboard to view this item&rsquo;s history.
+      </LibraryPageNotice>
+    );
   }
   return <HistoryShell item={real.item} events={real.events} />;
 }
 
 function HistoryShell({ item, events }: { item: LibraryItem | null; events: ProgressEvent[] }) {
-  if (!item) return <Notice>That item could not be found.</Notice>;
+  if (!item) return <LibraryPageNotice>That item could not be found.</LibraryPageNotice>;
 
   return (
-    <Frame>
+    <LibraryPageFrame>
       <h1 className="text-2xl font-semibold text-white">{item.title}</h1>
       <p className="mt-1 text-sm text-zinc-400">Progress history</p>
 
@@ -91,27 +95,6 @@ function HistoryShell({ item, events }: { item: LibraryItem | null; events: Prog
           ))}
         </ol>
       )}
-    </Frame>
-  );
-}
-
-function Notice({ children }: { children: React.ReactNode }) {
-  return (
-    <Frame>
-      <p className="text-sm text-zinc-300">{children}</p>
-    </Frame>
-  );
-}
-
-function Frame({ children }: { children: React.ReactNode }) {
-  return (
-    <main className="mx-auto w-full max-w-3xl px-4 py-10 text-zinc-100">
-      <section className="w-full rounded-2xl border border-white/10 bg-zinc-900/70 p-6">
-        <Link href="/" className="text-sm text-indigo-300 hover:text-indigo-200">
-          &larr; Back to dashboard
-        </Link>
-        <div className="mt-4">{children}</div>
-      </section>
-    </main>
+    </LibraryPageFrame>
   );
 }

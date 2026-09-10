@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   createLibraryItem,
+  fetchFinishedPerMonthSource,
   fetchLibraryItem,
   fetchProgressEvents,
   progressEventForStatusChange,
@@ -210,6 +211,77 @@ describe("fetchProgressEvents", () => {
     const fake = createFakeReadSupabase([]);
 
     await expect(fetchProgressEvents(fake.client, "item-1")).resolves.toEqual([]);
+  });
+});
+
+describe("fetchFinishedPerMonthSource", () => {
+  const rows = [
+    {
+      item_id: "movie-1",
+      to_status: "watching",
+      occurred_at: "2026-03-01T00:00:00.000Z",
+      items: { type: "movie", user_id: "user-1" },
+    },
+    {
+      item_id: "movie-1",
+      to_status: "watched",
+      occurred_at: "2026-04-10T00:00:00.000Z",
+      items: { type: "movie", user_id: "user-1" },
+    },
+    {
+      item_id: "book-1",
+      to_status: "read",
+      occurred_at: "2026-05-02T00:00:00.000Z",
+      items: { type: "book", user_id: "user-1" },
+    },
+  ];
+
+  it("joins progress_events to items, scopes to the user, and orders oldest first", async () => {
+    const fake = createFakeReadSupabase([]);
+
+    await fetchFinishedPerMonthSource(fake.client, "user-1");
+
+    expect(fake.calls).toEqual([
+      {
+        table: "progress_events",
+        method: "select",
+        args: ["item_id, to_status, occurred_at, items!inner(type, user_id)"],
+      },
+      { table: "progress_events", method: "eq", args: ["items.user_id", "user-1"] },
+      { table: "progress_events", method: "order", args: ["occurred_at", { ascending: true }] },
+    ]);
+  });
+
+  it("reduces each row to the aggregation's event shape", async () => {
+    const fake = createFakeReadSupabase(rows);
+
+    const { events } = await fetchFinishedPerMonthSource(fake.client, "user-1");
+
+    expect(events).toEqual([
+      { itemId: "movie-1", toStatus: "watching", occurredAt: "2026-03-01T00:00:00.000Z" },
+      { itemId: "movie-1", toStatus: "watched", occurredAt: "2026-04-10T00:00:00.000Z" },
+      { itemId: "book-1", toStatus: "read", occurredAt: "2026-05-02T00:00:00.000Z" },
+    ]);
+  });
+
+  it("deduplicates the joined types to one { id, type } per Item", async () => {
+    const fake = createFakeReadSupabase(rows);
+
+    const { items } = await fetchFinishedPerMonthSource(fake.client, "user-1");
+
+    expect(items).toEqual([
+      { id: "movie-1", type: "movie" },
+      { id: "book-1", type: "book" },
+    ]);
+  });
+
+  it("returns empty lists when the user has no events", async () => {
+    const fake = createFakeReadSupabase([]);
+
+    await expect(fetchFinishedPerMonthSource(fake.client, "user-1")).resolves.toEqual({
+      events: [],
+      items: [],
+    });
   });
 });
 

@@ -315,6 +315,12 @@ export function LibraryDashboard() {
                 >
                   Add page
                 </Link>
+                <Link
+                  href="/stats"
+                  className="h-[42px] rounded-xl border border-white/20 px-4 py-2 text-sm text-zinc-200"
+                >
+                  Stats
+                </Link>
               </div>
             </section>
 
