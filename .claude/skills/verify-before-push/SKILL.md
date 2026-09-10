@@ -24,9 +24,7 @@ saying plainly that you didn't check.
    anything outside this sandbox), say so explicitly and give the exact
    steps to check it: which page, which action, and what result confirms
    success. Do this before you say the ticket is ready to push.
-4. Only after step 3 is written out, suggest committing. Do not push or
-   close the issue yourself — wait for confirmation that the manual checks
-   passed.
+
 
 ## Done means
 Every acceptance criterion in your summary is tagged either
